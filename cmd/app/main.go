@@ -19,7 +19,7 @@ import (
 	"strings"
 )
 
-var publicKey *rsa.PublicKey
+var privateKey *rsa.PrivateKey
 
 func main() {
 	if len(os.Args) - 1 < 4 {
@@ -30,24 +30,18 @@ func main() {
 		inputImageDir := os.Args[3]
 		outputImageDir := os.Args[4]
 
+		fmt.Printf("loading private key at %s...\n", keyPath)
+		loadPrivateKey(keyPath)
+
+		fmt.Println("getting list of files in input directory")
 		files := getFiles(inputImageDir)
 
 		if actionType == "encrypt" {
-			pub, err := ioutil.ReadFile(keyPath)
-			if err != nil {
-				panic(err)
-			}
-			pubPem, _ := pem.Decode(pub)
-			if publicKey, err = x509.ParsePKIXPublicKey(pubPem.Bytes); err != nil {
-				panic(err)
-			}
-
-			// load public key
-			publicKey = rsa.
-
 			for _, filePath := range files {
 				if strings.HasSuffix(strings.ToLower(filePath), ".jpg") {
 					// file is a jpg
+					fmt.Printf("encrypting %s\n", filePath)
+
 					newFileName := uuid.New().String() + ".jpg"
 					newFilePath := fmt.Sprintf("%s%v%s", outputImageDir, os.PathSeparator, newFileName)
 					createPlaceholderJpeg(newFilePath)
@@ -104,12 +98,45 @@ func addEncryptedPayloadToImage(containerImagePath string, sourceImagePath strin
 	encryptedBytes, err := rsa.EncryptOAEP(
 		sha256.New(),
 		rand.Reader,
-		&publicKey,
+		&privateKey.PublicKey,
 		dat,
 		nil)
 	if err != nil {
 		panic(err)
 	}
 
+	// append encrypted binary to container file
+	f, err := os.OpenFile(containerImagePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
 
+	if _, err = 	f.Write(encryptedBytes); err != nil {
+		panic(err)
+	}
+}
+
+func loadPrivateKey(privateFileKeyPath string) {
+	pemData, err := ioutil.ReadFile(privateFileKeyPath)
+	if err != nil {
+		log.Fatalf("read key file: %s", err)
+	}
+
+	// Extract the PEM-encoded data block
+	block, _ := pem.Decode(pemData)
+	if block == nil {
+		log.Fatalf("bad key data: %s", "not PEM-encoded")
+	}
+	if got, want := block.Type, "RSA PRIVATE KEY"; got != want {
+		log.Fatalf("unknown key type %q, want %q", got, want)
+	}
+
+	// Decode the RSA private key
+	priv, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		log.Fatalf("bad private key: %s", err)
+	}
+
+	privateKey = priv
 }
