@@ -263,7 +263,7 @@ func decryptPayloadFromImageContainer(filePath string) {
 			panic(err)
 		}
 
-		path := fmt.Sprintf("%s%c%s", outputFileDir, os.PathSeparator, decryptedRelativePath)
+		path := normalizePathSeparator(fmt.Sprintf("%s%c%s", outputFileDir, os.PathSeparator, decryptedRelativePath))
 		fmt.Printf("decrypting payload to %s\n", path)
 
 		if err := createDirsForFile(path); err != nil {
@@ -293,4 +293,20 @@ func dirExists(path string) bool {
 	}
 
 	return false
+}
+
+// normalize file paths from other operating systems if needed
+func normalizePathSeparator(filePath string) string {
+	currentSep := string(os.PathSeparator)
+	otherSep := "\\"
+
+	if currentSep == "\\" {
+		otherSep = "/"
+	}
+
+	if strings.Contains(filePath, otherSep) {
+		return strings.ReplaceAll(filePath, otherSep, currentSep)
+	}
+
+	return filePath
 }
