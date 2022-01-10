@@ -17,10 +17,10 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	mathRand "math/rand"
 	"os"
 	"path/filepath"
 	"strings"
-	mathRand "math/rand"
 )
 
 var jpegSuffixBytes []byte = []byte{0xFF, 0xD9} // end of container file marker
@@ -32,7 +32,7 @@ var outputImageDir string
 
 func main() {
 	if len(os.Args) - 1 < 4 {
-		// error out
+		log.Fatalln("not enough arguments")
 	} else {
 		actionType := os.Args[1]
 		privateKeyPath := os.Args[2]
@@ -68,6 +68,7 @@ func main() {
 			}
 		} else {
 			// error
+			log.Fatalln("unknown action command")
 		}
 	}
 }
@@ -287,7 +288,7 @@ func createDirsForFile(filePath string) error {
 }
 
 func dirExists(path string) bool {
-	if _, err := os.Stat("/path/to/whatever"); err == nil {
+	if _, err := os.Stat(path); err == nil {
 		return true
 	}
 
