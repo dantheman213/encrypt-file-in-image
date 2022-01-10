@@ -28,7 +28,7 @@ var pathMarkerBytes []byte = []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0xCB, 0x
 
 var privateKey *rsa.PrivateKey
 var baseDirName string
-var outputImageDir string
+var outputFileDir string
 
 func main() {
 	if len(os.Args) - 1 < 4 {
@@ -36,23 +36,23 @@ func main() {
 	} else {
 		actionType := os.Args[1]
 		privateKeyPath := os.Args[2]
-		inputImageDir := os.Args[3]
-		outputImageDir = os.Args[4]
+		inputFileDir := os.Args[3]
+		outputFileDir = os.Args[4]
 
 		fmt.Printf("loading private key at %s...\n", privateKeyPath)
 		loadPrivateKey(privateKeyPath)
 
 		fmt.Println("getting list of files in input directory")
-		files := getFiles(inputImageDir)
+		files := getFiles(inputFileDir)
 
 		if actionType == "encrypt" {
-			pathParts := strings.Split(inputImageDir, string(os.PathSeparator))
+			pathParts := strings.Split(inputFileDir, string(os.PathSeparator))
 			baseDirName = pathParts[len(pathParts) - 1]
 			fmt.Printf("base path set as %s\n", baseDirName)
 
 			for _, filePath := range files {
 				newFileName := uuid.New().String() + ".jpg"
-				newFilePath := fmt.Sprintf("%s%c%s", outputImageDir, os.PathSeparator, newFileName)
+				newFilePath := fmt.Sprintf("%s%c%s", outputFileDir, os.PathSeparator, newFileName)
 
 				fmt.Printf("encrypting %s to %s\n", filePath, newFilePath)
 
@@ -263,7 +263,7 @@ func decryptPayloadFromImageContainer(filePath string) {
 			panic(err)
 		}
 
-		path := fmt.Sprintf("%s%c%s", outputImageDir, os.PathSeparator, decryptedRelativePath)
+		path := fmt.Sprintf("%s%c%s", outputFileDir, os.PathSeparator, decryptedRelativePath)
 		fmt.Printf("decrypting payload to %s\n", path)
 
 		if err := createDirsForFile(path); err != nil {
