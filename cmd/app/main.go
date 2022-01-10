@@ -81,8 +81,10 @@ func getFiles(dirPath string) []string {
 			if err != nil {
 				return err
 			}
+			if !info.IsDir() {
+				files = append(files, path)
+			}
 			//fmt.Println(path, info.Size())
-			files = append(files, path)
 			return nil
 		})
 	if err != nil {
