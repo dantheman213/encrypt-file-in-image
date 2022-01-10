@@ -8,18 +8,24 @@ import (
 	"encoding/pem"
 	"fmt"
 	"github.com/google/uuid"
+	"hash"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	mathRand "math/rand"
 )
 
 var privateKey *rsa.PrivateKey
+var baseDirName string
+var pathMarkerBytes []byte = []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0xCB, 0xEE }
+var jpegSuffixBytes []byte = []byte{0xFF, 0xD9}
 
 func main() {
 	if len(os.Args) - 1 < 4 {
@@ -37,13 +43,18 @@ func main() {
 		files := getFiles(inputImageDir)
 
 		if actionType == "encrypt" {
+			pathParts := strings.Split(inputImageDir, string(os.PathSeparator))
+			baseDirName = pathParts[len(pathParts) - 1]
+			fmt.Printf("base path set as %s\n", baseDirName)
+
 			for _, filePath := range files {
 				if strings.HasSuffix(strings.ToLower(filePath), ".jpg") {
 					// file is a jpg
-					fmt.Printf("encrypting %s\n", filePath)
-
 					newFileName := uuid.New().String() + ".jpg"
-					newFilePath := fmt.Sprintf("%s%v%s", outputImageDir, os.PathSeparator, newFileName)
+					newFilePath := fmt.Sprintf("%s%c%s", outputImageDir, os.PathSeparator, newFileName)
+
+					fmt.Printf("encrypting %s to %s\n", filePath, newFilePath)
+
 					createPlaceholderJpeg(newFilePath)
 					addEncryptedPayloadToImage(newFilePath, filePath)
 				}
@@ -76,8 +87,9 @@ func getFiles(dirPath string) []string {
 }
 
 func createPlaceholderJpeg(outputFilePath string) {
-	img := image.NewRGBA(image.Rect(0, 0, 220, 220)) // x1,y1,  x2,y2 of background rectangle
-	selectedColor := color.RGBA{0, 100, 0, 255}  //  R, G, B, Alpha
+	img := image.NewRGBA(image.Rect(0, 0, getRandomNum(1000, 5000), getRandomNum(1000, 5000))) // x1,y1,  x2,y2 of background rectangle
+
+	selectedColor := color.RGBA{uint8(getRandomNum(0, 255)), uint8(getRandomNum(0, 255)), uint8(getRandomNum(0, 255)), 255} //  R, G, B, Alpha
 	draw.Draw(img, img.Bounds(), &image.Uniform{selectedColor}, image.ZP, draw.Src)
 
 	f, err := os.Create(outputFilePath)     // ... now lets save imag
@@ -95,7 +107,7 @@ func createPlaceholderJpeg(outputFilePath string) {
 func addEncryptedPayloadToImage(containerImagePath string, sourceImagePath string) {
 	dat, err := ioutil.ReadFile(sourceImagePath)
 
-	encryptedBytes, err := rsa.EncryptOAEP(
+	encryptedDataBytes, err := encryptOAEP(
 		sha256.New(),
 		rand.Reader,
 		&privateKey.PublicKey,
@@ -105,6 +117,21 @@ func addEncryptedPayloadToImage(containerImagePath string, sourceImagePath strin
 		panic(err)
 	}
 
+	relativeFilePath := getRelativePathFromFilePath(sourceImagePath)
+	fmt.Printf("embedding relative path %s\n", relativeFilePath)
+	encryptedPathBytes, err := encryptOAEP(
+		sha256.New(),
+		rand.Reader,
+		&privateKey.PublicKey,
+		[]byte(relativeFilePath),
+		nil)
+	if err != nil {
+		panic(err)
+	}
+
+	encryptedFinalPayload := append(encryptedDataBytes, pathMarkerBytes...)
+	encryptedFinalPayload = append(encryptedFinalPayload, encryptedPathBytes...)
+
 	// append encrypted binary to container file
 	f, err := os.OpenFile(containerImagePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
@@ -112,7 +139,7 @@ func addEncryptedPayloadToImage(containerImagePath string, sourceImagePath strin
 	}
 	defer f.Close()
 
-	if _, err = 	f.Write(encryptedBytes); err != nil {
+	if _, err = f.Write(encryptedFinalPayload); err != nil {
 		panic(err)
 	}
 }
@@ -139,4 +166,57 @@ func loadPrivateKey(privateFileKeyPath string) {
 	}
 
 	privateKey = priv
+}
+
+func encryptOAEP(hash hash.Hash, random io.Reader, public *rsa.PublicKey, msg []byte, label []byte) ([]byte, error) {
+	msgLen := len(msg)
+	step := public.Size() - 2*hash.Size() - 2
+	var encryptedBytes []byte
+
+	for start := 0; start < msgLen; start += step {
+		finish := start + step
+		if finish > msgLen {
+			finish = msgLen
+		}
+
+		encryptedBlockBytes, err := rsa.EncryptOAEP(hash, random, public, msg[start:finish], label)
+		if err != nil {
+			return nil, err
+		}
+
+		encryptedBytes = append(encryptedBytes, encryptedBlockBytes...)
+	}
+
+	return encryptedBytes, nil
+}
+
+func decryptOAEP(hash hash.Hash, random io.Reader, private *rsa.PrivateKey, msg []byte, label []byte) ([]byte, error) {
+	msgLen := len(msg)
+	step := private.PublicKey.Size()
+	var decryptedBytes []byte
+
+	for start := 0; start < msgLen; start += step {
+		finish := start + step
+		if finish > msgLen {
+			finish = msgLen
+		}
+
+		decryptedBlockBytes, err := rsa.DecryptOAEP(hash, random, private, msg[start:finish], label)
+		if err != nil {
+			return nil, err
+		}
+
+		decryptedBytes = append(decryptedBytes, decryptedBlockBytes...)
+	}
+
+	return decryptedBytes, nil
+}
+
+func getRelativePathFromFilePath(filePath string) string {
+	relativePathPosStart := strings.Index(filePath, baseDirName + string(os.PathSeparator))
+	return filePath[relativePathPosStart:len(filePath)]
+}
+
+func getRandomNum(min, max int) int {
+	return mathRand.Intn(max - min) + min
 }
