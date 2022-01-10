@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -22,22 +23,24 @@ import (
 	mathRand "math/rand"
 )
 
+var jpegSuffixBytes []byte = []byte{0xFF, 0xD9} // end of container file marker
+var pathMarkerBytes []byte = []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0xCB, 0xEE } // separates payload from stored path
+
 var privateKey *rsa.PrivateKey
 var baseDirName string
-var pathMarkerBytes []byte = []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0xCB, 0xEE }
-var jpegSuffixBytes []byte = []byte{0xFF, 0xD9}
+var outputImageDir string
 
 func main() {
 	if len(os.Args) - 1 < 4 {
 		// error out
 	} else {
 		actionType := os.Args[1]
-		keyPath := os.Args[2]
+		privateKeyPath := os.Args[2]
 		inputImageDir := os.Args[3]
-		outputImageDir := os.Args[4]
+		outputImageDir = os.Args[4]
 
-		fmt.Printf("loading private key at %s...\n", keyPath)
-		loadPrivateKey(keyPath)
+		fmt.Printf("loading private key at %s...\n", privateKeyPath)
+		loadPrivateKey(privateKeyPath)
 
 		fmt.Println("getting list of files in input directory")
 		files := getFiles(inputImageDir)
@@ -48,19 +51,21 @@ func main() {
 			fmt.Printf("base path set as %s\n", baseDirName)
 
 			for _, filePath := range files {
-				if strings.HasSuffix(strings.ToLower(filePath), ".jpg") {
-					// file is a jpg
-					newFileName := uuid.New().String() + ".jpg"
-					newFilePath := fmt.Sprintf("%s%c%s", outputImageDir, os.PathSeparator, newFileName)
+				newFileName := uuid.New().String() + ".jpg"
+				newFilePath := fmt.Sprintf("%s%c%s", outputImageDir, os.PathSeparator, newFileName)
 
-					fmt.Printf("encrypting %s to %s\n", filePath, newFilePath)
+				fmt.Printf("encrypting %s to %s\n", filePath, newFilePath)
 
-					createPlaceholderJpeg(newFilePath)
-					addEncryptedPayloadToImage(newFilePath, filePath)
-				}
+				createPlaceholderJpeg(newFilePath)
+				addEncryptedPayloadToImage(newFilePath, filePath)
 			}
 		} else if actionType == "decrypt" {
-
+			for _, filePath := range files {
+				if strings.HasSuffix(strings.ToLower(filePath), ".jpg") {
+					// found jpg file, assume it's an encrypted container
+					decryptPayloadFromImageContainer(filePath)
+				}
+			}
 		} else {
 			// error
 		}
@@ -219,4 +224,72 @@ func getRelativePathFromFilePath(filePath string) string {
 
 func getRandomNum(min, max int) int {
 	return mathRand.Intn(max - min) + min
+}
+
+func decryptPayloadFromImageContainer(filePath string) {
+	dat, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("attempting to decrypt %s... ", filePath)
+
+	jpegEndOffset := bytes.Index(dat, jpegSuffixBytes)
+	pathMarkerOffset := bytes.Index(dat, pathMarkerBytes)
+	if pathMarkerOffset > 1 && jpegEndOffset > 1 {
+		fmt.Printf("found encrypted container...!\n")
+
+		payloadDat := dat[jpegEndOffset + 2: pathMarkerOffset]
+		relativePathDat := dat[pathMarkerOffset + 8:len(dat)]
+
+		decryptedPayload, err := decryptOAEP(sha256.New(),
+			rand.Reader,
+			privateKey,
+			payloadDat,
+			nil)
+
+		if err != nil {
+			panic(err)
+		}
+
+		decryptedRelativePath, err := decryptOAEP(sha256.New(),
+			rand.Reader,
+			privateKey,
+			relativePathDat,
+			nil)
+
+		if err != nil {
+			panic(err)
+		}
+
+		path := fmt.Sprintf("%s%c%s", outputImageDir, os.PathSeparator, decryptedRelativePath)
+		fmt.Printf("decrypting payload to %s\n", path)
+
+		if err := createDirsForFile(path); err != nil {
+			panic(err)
+		}
+
+		if err := ioutil.WriteFile(path, decryptedPayload, 0775); err != nil {
+			panic(err)
+		}
+	} else {
+		fmt.Printf("didn't encrypted payload... skipping...\n")
+	}
+}
+
+func createDirsForFile(filePath string) error {
+	dir := filepath.Dir(filePath)
+	if !dirExists(dir) {
+		return os.MkdirAll(dir, 0770)
+	}
+
+	return nil
+}
+
+func dirExists(path string) bool {
+	if _, err := os.Stat("/path/to/whatever"); err == nil {
+		return true
+	}
+
+	return false
 }
