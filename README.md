@@ -17,7 +17,7 @@ make
 ### Generate key pair
 
 ```
-openssl genrsa -out /home/user/.ssh/priv.pem 2048
+head -c 32 /dev/urandom > file.key
 ```
 
 ### Encrypt

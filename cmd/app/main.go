@@ -26,7 +26,7 @@ import (
 var jpegSuffixBytes []byte = []byte{0xFF, 0xD9} // end of container file marker
 var pathMarkerBytes []byte = []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0xCB, 0xEE } // separates payload from stored path
 
-var privateKey *rsa.PrivateKey
+var key []byte
 var baseDirName string
 var outputFileDir string
 
