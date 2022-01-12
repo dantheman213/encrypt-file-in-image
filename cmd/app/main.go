@@ -26,6 +26,13 @@ var pathMarkerBytes []byte = []byte{0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0xCB, 0x
 var key []byte
 var baseDirName string
 var outputFileDir string
+var fileMap map[string]*DataModelItem
+
+type DataModelItem struct {
+	SourceRelativePath string
+	SourceFileHash string
+	ContainerFileName string
+}
 
 func main() {
 	if len(os.Args) - 1 < 4 {
@@ -100,7 +107,7 @@ func createPlaceholderJpeg(outputFilePath string) {
 	selectedColor := color.RGBA{uint8(getRandomNum(0, 255)), uint8(getRandomNum(0, 255)), uint8(getRandomNum(0, 255)), 255} //  R, G, B, Alpha
 	draw.Draw(img, img.Bounds(), &image.Uniform{selectedColor}, image.ZP, draw.Src)
 
-	f, err := os.Create(outputFilePath)     // ... now lets save imag
+	f, err := os.Create(outputFilePath)
 	if err != nil {
 		panic(err)
 	}
@@ -255,4 +262,8 @@ func loadAESKey(keyFilePath string) error {
 	key, err = ioutil.ReadFile(keyFilePath)
 
 	return err
+}
+
+func loadFileMap(filePath string) {
+
 }
