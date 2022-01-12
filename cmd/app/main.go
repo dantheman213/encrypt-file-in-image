@@ -37,7 +37,10 @@ func main() {
 		outputFileDir = os.Args[4]
 
 		fmt.Printf("loading key at %s...\n", keyPath)
-		loadAESKey(keyPath)
+		err := loadAESKey(keyPath)
+		if err != nil {
+			panic(err)
+		}
 
 		fmt.Println("getting list of files in input directory")
 		files := getFiles(inputFileDir)
