@@ -1,4 +1,4 @@
-BIN_NAME := image-encrypt
+BIN_NAME := encrypt-file-in-image
 BIN_PATH := bin/$(BIN_NAME)
 BUILD_FLAGS := -installsuffix "static"
 
