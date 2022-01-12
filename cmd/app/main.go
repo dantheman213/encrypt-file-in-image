@@ -2,14 +2,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"github.com/google/uuid"
-	"hash"
 	"image"
 	"image/color"
 	"image/draw"
@@ -35,12 +32,12 @@ func main() {
 		log.Fatalln("not enough arguments")
 	} else {
 		actionType := os.Args[1]
-		privateKeyPath := os.Args[2]
+		keyPath := os.Args[2]
 		inputFileDir := os.Args[3]
 		outputFileDir = os.Args[4]
 
-		fmt.Printf("loading private key at %s...\n", privateKeyPath)
-		loadPrivateKey(privateKeyPath)
+		fmt.Printf("loading key at %s...\n", keyPath)
+		loadAESKey(keyPath)
 
 		fmt.Println("getting list of files in input directory")
 		files := getFiles(inputFileDir)
@@ -114,31 +111,35 @@ func createPlaceholderJpeg(outputFilePath string) {
 
 func addEncryptedPayloadToImage(containerImagePath string, sourceImagePath string) {
 	dat, err := ioutil.ReadFile(sourceImagePath)
-
-	encryptedDataBytes, err := encryptOAEP(
-		sha256.New(),
-		rand.Reader,
-		&privateKey.PublicKey,
-		dat,
-		nil)
 	if err != nil {
 		panic(err)
 	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		panic(err)
+	}
+
+	nonce := make([]byte, 12)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		panic(err)
+	}
+
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	encryptedPayload := aesgcm.Seal(nil, nonce, dat, nil)
 
 	relativeFilePath := getRelativePathFromFilePath(sourceImagePath)
 	fmt.Printf("embedding relative path %s\n", relativeFilePath)
-	encryptedPathBytes, err := encryptOAEP(
-		sha256.New(),
-		rand.Reader,
-		&privateKey.PublicKey,
-		[]byte(relativeFilePath),
-		nil)
-	if err != nil {
-		panic(err)
-	}
 
-	encryptedFinalPayload := append(encryptedDataBytes, pathMarkerBytes...)
-	encryptedFinalPayload = append(encryptedFinalPayload, encryptedPathBytes...)
+	encryptedPath := aesgcm.Seal(nil, nonce, []byte(relativeFilePath), nil)
+
+	encryptedFinalPayload := append(encryptedPayload, pathMarkerBytes...)
+	encryptedFinalPayload = append(encryptedFinalPayload, encryptedPath...)
+	encryptedFinalPayload = append(encryptedFinalPayload, nonce...)
 
 	// append encrypted binary to container file
 	f, err := os.OpenFile(containerImagePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
@@ -150,74 +151,6 @@ func addEncryptedPayloadToImage(containerImagePath string, sourceImagePath strin
 	if _, err = f.Write(encryptedFinalPayload); err != nil {
 		panic(err)
 	}
-}
-
-func loadPrivateKey(privateFileKeyPath string) {
-	pemData, err := ioutil.ReadFile(privateFileKeyPath)
-	if err != nil {
-		log.Fatalf("read key file: %s", err)
-	}
-
-	// Extract the PEM-encoded data block
-	block, _ := pem.Decode(pemData)
-	if block == nil {
-		log.Fatalf("bad key data: %s", "not PEM-encoded")
-	}
-	if got, want := block.Type, "RSA PRIVATE KEY"; got != want {
-		log.Fatalf("unknown key type %q, want %q", got, want)
-	}
-
-	// Decode the RSA private key
-	priv, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		log.Fatalf("bad private key: %s", err)
-	}
-
-	privateKey = priv
-}
-
-func encryptOAEP(hash hash.Hash, random io.Reader, public *rsa.PublicKey, msg []byte, label []byte) ([]byte, error) {
-	msgLen := len(msg)
-	step := public.Size() - 2*hash.Size() - 2
-	var encryptedBytes []byte
-
-	for start := 0; start < msgLen; start += step {
-		finish := start + step
-		if finish > msgLen {
-			finish = msgLen
-		}
-
-		encryptedBlockBytes, err := rsa.EncryptOAEP(hash, random, public, msg[start:finish], label)
-		if err != nil {
-			return nil, err
-		}
-
-		encryptedBytes = append(encryptedBytes, encryptedBlockBytes...)
-	}
-
-	return encryptedBytes, nil
-}
-
-func decryptOAEP(hash hash.Hash, random io.Reader, private *rsa.PrivateKey, msg []byte, label []byte) ([]byte, error) {
-	msgLen := len(msg)
-	step := private.PublicKey.Size()
-	var decryptedBytes []byte
-
-	for start := 0; start < msgLen; start += step {
-		finish := start + step
-		if finish > msgLen {
-			finish = msgLen
-		}
-
-		decryptedBlockBytes, err := rsa.DecryptOAEP(hash, random, private, msg[start:finish], label)
-		if err != nil {
-			return nil, err
-		}
-
-		decryptedBytes = append(decryptedBytes, decryptedBlockBytes...)
-	}
-
-	return decryptedBytes, nil
 }
 
 func getRelativePathFromFilePath(filePath string) string {
@@ -243,24 +176,25 @@ func decryptPayloadFromImageContainer(filePath string) {
 		fmt.Printf("found encrypted container...!\n")
 
 		payloadDat := dat[jpegEndOffset + 2: pathMarkerOffset]
-		relativePathDat := dat[pathMarkerOffset + 8:len(dat)]
+		relativePathDat := dat[pathMarkerOffset + 8:len(dat)-12]
+		nonceDat := dat[len(dat)-12:len(dat)]
 
-		decryptedPayload, err := decryptOAEP(sha256.New(),
-			rand.Reader,
-			privateKey,
-			payloadDat,
-			nil)
-
+		block, err := aes.NewCipher(key)
 		if err != nil {
 			panic(err)
 		}
 
-		decryptedRelativePath, err := decryptOAEP(sha256.New(),
-			rand.Reader,
-			privateKey,
-			relativePathDat,
-			nil)
+		aesgcm, err := cipher.NewGCM(block)
+		if err != nil {
+			panic(err)
+		}
 
+		decryptedPayload, err := aesgcm.Open(nil, nonceDat, payloadDat, nil)
+		if err != nil {
+			panic(err)
+		}
+
+		decryptedRelativePath, err := aesgcm.Open(nil, nonceDat, relativePathDat, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -311,4 +245,11 @@ func normalizePathSeparator(filePath string) string {
 	}
 
 	return filePath
+}
+
+func loadAESKey(keyFilePath string) error {
+	var err error
+	key, err = ioutil.ReadFile(keyFilePath)
+
+	return err
 }
