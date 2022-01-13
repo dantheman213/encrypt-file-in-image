@@ -43,9 +43,11 @@ func main() {
 		}
 
 		fmt.Println("getting list of files in input directory")
-		files := getFiles(inputFileDir)
 
+		counter := 0
 		if actionType == "encrypt" {
+			files := getFiles(inputFileDir, nil)
+
 			pathParts := strings.Split(inputFileDir, string(os.PathSeparator))
 			baseDirName = pathParts[len(pathParts) - 1]
 			fmt.Printf("base path set as %s\n", baseDirName)
@@ -58,13 +60,19 @@ func main() {
 
 				createPlaceholderJpeg(newFilePath)
 				addEncryptedPayloadToImage(newFilePath, filePath)
+
+				counter += 1
+				printProgress(counter, len(files))
 			}
 		} else if actionType == "decrypt" {
+			extFilter := "jpg"
+			files := getFiles(inputFileDir, &extFilter)
+
 			for _, filePath := range files {
-				if strings.HasSuffix(strings.ToLower(filePath), ".jpg") {
-					// found jpg file, assume it's an encrypted container
-					decryptPayloadFromImageContainer(filePath)
-				}
+				decryptPayloadFromImageContainer(filePath)
+
+				counter += 1
+				printProgress(counter, len(files))
 			}
 		} else {
 			// error
@@ -73,7 +81,11 @@ func main() {
 	}
 }
 
-func getFiles(dirPath string) []string {
+func printProgress(count int, totalFileCount int) {
+	fmt.Printf("completed %d of %d... %.2f%%\n", count, totalFileCount, float64(count) / float64(totalFileCount))
+}
+
+func getFiles(dirPath string, extFilter* string) []string {
 	var files []string
 
 	err := filepath.Walk(dirPath,
@@ -82,15 +94,22 @@ func getFiles(dirPath string) []string {
 				return err
 			}
 			if !info.IsDir() {
-				files = append(files, path)
+				if extFilter != nil {
+					if strings.ToLower(path[strings.LastIndex(path, ".") + 1:]) == *extFilter {
+						files = append(files, path)
+					}
+				} else {
+					files = append(files, path)
+				}
 			}
-			//fmt.Println(path, info.Size())
+
 			return nil
 		})
 	if err != nil {
 		log.Println(err)
 	}
 
+	fmt.Printf("found %d files!\n", len(files))
 	return files
 }
 
@@ -213,7 +232,7 @@ func decryptPayloadFromImageContainer(filePath string) {
 			panic(err)
 		}
 	} else {
-		fmt.Printf("didn't encrypted payload... skipping...\n")
+		fmt.Printf("didn't find encrypted payload... skipping...\n")
 	}
 }
 
