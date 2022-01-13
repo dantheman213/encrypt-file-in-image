@@ -14,7 +14,7 @@ cd encrypt-file-in-image/
 make
 ```
 
-### Generate key pair
+### Generate encryption key
 
 ```
 head -c 32 /dev/urandom > file.key
