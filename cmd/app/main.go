@@ -162,6 +162,7 @@ func addEncryptedPayloadToImage(containerImagePath string, sourceImagePath strin
 	encryptedFinalPayload := append(encryptedPayload, pathMarkerBytes...)
 	encryptedFinalPayload = append(encryptedFinalPayload, encryptedPath...)
 	encryptedFinalPayload = append(encryptedFinalPayload, nonce...)
+	encryptedFinalPayload = append(encryptedFinalPayload, jpegSuffixBytes...)
 
 	// append encrypted binary to container file
 	f, err := os.OpenFile(containerImagePath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
@@ -198,8 +199,8 @@ func decryptPayloadFromImageContainer(filePath string) {
 		fmt.Printf("found encrypted container...!\n")
 
 		payloadDat := dat[jpegEndOffset + 2: pathMarkerOffset]
-		relativePathDat := dat[pathMarkerOffset + 8:len(dat)-12]
-		nonceDat := dat[len(dat)-12:len(dat)]
+		relativePathDat := dat[pathMarkerOffset + 8:len(dat)-14] // -14 = 12 bytes for nonce, 2 bytes for fake jpeg suffix
+		nonceDat := dat[len(dat)-14:len(dat)-2] // nonce is 12 bytes that's 2 bytes from the end of file
 
 		block, err := aes.NewCipher(key)
 		if err != nil {
